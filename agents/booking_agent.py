@@ -1,0 +1,312 @@
+"""
+ClinicFlow AI — Booking Agent Tools
+Handles: appointment booking, rescheduling, availability, periodic sessions
+"""
+
+import os
+import psycopg2
+import psycopg2.extras
+from decimal import Decimal
+from datetime import datetime, timedelta, date
+from dotenv import load_dotenv
+
+load_dotenv()
+
+DB_CONFIG = {
+    "host":     os.getenv("DB_HOST"),
+    "port":     os.getenv("DB_PORT", "5432"),
+    "dbname":   os.getenv("DB_NAME", "postgres"),
+    "user":     os.getenv("DB_USER", "postgres"),
+    "password": os.getenv("DB_PASSWORD"),
+    "sslmode":  "require",
+}
+
+def _db():
+    return psycopg2.connect(**DB_CONFIG)
+
+def _s(val):
+    if isinstance(val, Decimal): return float(val)
+    if isinstance(val, (date, datetime)): return str(val)
+    return val
+
+def _rows(cur):
+    return [{k: _s(v) for k, v in dict(r).items()} for r in cur.fetchall()]
+
+
+def get_todays_appointments(doctor_id: int = 1) -> dict:
+    """
+    Get all appointments scheduled for today for the doctor.
+
+    Args:
+        doctor_id: Doctor's ID (default 1)
+
+    Returns:
+        dict with list of today's appointments with patient details.
+    """
+    sql = """
+        SELECT a.appointment_id, a.scheduled_at, a.duration_mins,
+               a.status, a.reason, a.appointment_type,
+               a.is_periodic, a.session_number, a.total_sessions,
+               p.name AS patient_name, p.age, p.phone,
+               p.chronic_conditions, p.allergies
+        FROM appointments a
+        JOIN patients p ON a.patient_id = p.patient_id
+        WHERE a.doctor_id = %s
+          AND DATE(a.scheduled_at) = CURRENT_DATE
+          AND a.status != 'cancelled'
+        ORDER BY a.scheduled_at
+    """
+    conn = _db()
+    try:
+        with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+            cur.execute(sql, (doctor_id,))
+            appts = _rows(cur)
+        return {"appointments": appts, "count": len(appts), "date": str(date.today())}
+    finally:
+        conn.close()
+
+
+def get_upcoming_appointments(patient_id: int = None, doctor_id: int = None, days: int = 7) -> dict:
+    """
+    Get upcoming appointments for a patient or doctor.
+
+    Args:
+        patient_id: Patient ID (use for patient role)
+        doctor_id: Doctor ID (use for doctor role)
+        days: How many days ahead to look (default 7)
+
+    Returns:
+        dict with upcoming appointments.
+    """
+    conditions = ["a.status = 'scheduled'", "a.scheduled_at >= NOW()"]
+    params = []
+    if patient_id:
+        conditions.append("a.patient_id = %s")
+        params.append(patient_id)
+    if doctor_id:
+        conditions.append("a.doctor_id = %s")
+        params.append(doctor_id)
+    conditions.append("a.scheduled_at <= NOW() + INTERVAL '%s days'" % days)
+
+    sql = f"""
+        SELECT a.appointment_id, a.scheduled_at, a.duration_mins,
+               a.status, a.reason, a.appointment_type,
+               a.is_periodic, a.session_number, a.total_sessions,
+               p.name AS patient_name, p.phone,
+               d.name AS doctor_name
+        FROM appointments a
+        JOIN patients p ON a.patient_id = p.patient_id
+        JOIN doctors d ON a.doctor_id = d.doctor_id
+        WHERE {' AND '.join(conditions)}
+        ORDER BY a.scheduled_at
+        LIMIT 20
+    """
+    conn = _db()
+    try:
+        with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+            cur.execute(sql, params)
+            appts = _rows(cur)
+        return {"appointments": appts, "count": len(appts)}
+    finally:
+        conn.close()
+
+
+def book_appointment(patient_id: int, doctor_id: int, preferred_datetime: str,
+                     reason: str = "", duration_mins: int = 30) -> dict:
+    """
+    Book a new appointment. Auto-approves if slot is available.
+
+    Args:
+        patient_id: Patient's ID
+        doctor_id: Doctor's ID (default 1)
+        preferred_datetime: Preferred datetime in 'YYYY-MM-DD HH:MM' format
+        reason: Chief complaint or reason for visit
+        duration_mins: Appointment duration in minutes (default 30)
+
+    Returns:
+        dict with booking confirmation or alternative slots if unavailable.
+    """
+    try:
+        scheduled_at = datetime.strptime(preferred_datetime, "%Y-%m-%d %H:%M")
+    except ValueError:
+        return {"error": "Invalid datetime format. Use YYYY-MM-DD HH:MM"}
+
+    # Check for conflicts
+    conn = _db()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("""
+                SELECT COUNT(*) FROM appointments
+                WHERE doctor_id = %s
+                  AND status = 'scheduled'
+                  AND scheduled_at < %s + INTERVAL '%s minutes'
+                  AND scheduled_at + (duration_mins || ' minutes')::INTERVAL > %s
+            """, (doctor_id, scheduled_at, duration_mins, scheduled_at))
+            conflict_count = cur.fetchone()[0]
+
+        if conflict_count > 0:
+            # Find next 3 available slots
+            alternatives = _find_available_slots(doctor_id, scheduled_at, 3)
+            return {
+                "status": "conflict",
+                "message": "Requested slot is not available.",
+                "alternative_slots": alternatives,
+            }
+
+        # Book it — auto-approve
+        with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+            cur.execute("""
+                INSERT INTO appointments
+                    (patient_id, doctor_id, appointment_type, scheduled_at,
+                     duration_mins, status, reason)
+                VALUES (%s, %s, 'doctor', %s, %s, 'scheduled', %s)
+                RETURNING appointment_id, scheduled_at, status
+            """, (patient_id, doctor_id, scheduled_at, duration_mins, reason))
+            appt = dict(cur.fetchone())
+            conn.commit()
+
+        return {
+            "status": "confirmed",
+            "appointment_id": appt["appointment_id"],
+            "scheduled_at": str(appt["scheduled_at"]),
+            "message": f"Appointment confirmed for {scheduled_at.strftime('%A, %d %B at %I:%M %p')}",
+        }
+    finally:
+        conn.close()
+
+
+def reschedule_appointment(appointment_id: int, new_datetime: str,
+                           reason: str = "Doctor unavailable") -> dict:
+    """
+    Reschedule an existing appointment to a new time.
+
+    Args:
+        appointment_id: The appointment ID to reschedule
+        new_datetime: New datetime in 'YYYY-MM-DD HH:MM' format
+        reason: Reason for rescheduling
+
+    Returns:
+        dict with reschedule confirmation.
+    """
+    try:
+        new_dt = datetime.strptime(new_datetime, "%Y-%m-%d %H:%M")
+    except ValueError:
+        return {"error": "Invalid datetime format. Use YYYY-MM-DD HH:MM"}
+
+    conn = _db()
+    try:
+        with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+            cur.execute("""
+                UPDATE appointments
+                SET scheduled_at = %s, status = 'rescheduled'
+                WHERE appointment_id = %s
+                RETURNING appointment_id, scheduled_at, patient_id
+            """, (new_dt, appointment_id))
+            row = cur.fetchone()
+            conn.commit()
+
+        if not row:
+            return {"error": f"Appointment {appointment_id} not found"}
+
+        return {
+            "status": "rescheduled",
+            "appointment_id": appointment_id,
+            "new_datetime": str(new_dt),
+            "message": f"Appointment rescheduled to {new_dt.strftime('%A, %d %B at %I:%M %p')}",
+            "patient_id": row["patient_id"],
+        }
+    finally:
+        conn.close()
+
+
+def schedule_periodic_sessions(patient_id: int, doctor_id: int,
+                                start_datetime: str, period_days: int,
+                                total_sessions: int, reason: str,
+                                assign_nurse_alternating: bool = False) -> dict:
+    """
+    Schedule a series of periodic appointments (e.g. weekly physiotherapy).
+    Optionally assigns alternate sessions to nurse.
+
+    Args:
+        patient_id: Patient ID
+        doctor_id: Doctor ID
+        start_datetime: First session datetime 'YYYY-MM-DD HH:MM'
+        period_days: Days between sessions (e.g. 7 for weekly)
+        total_sessions: Total number of sessions
+        reason: Purpose of periodic sessions
+        assign_nurse_alternating: If True, alternate sessions assigned to nurse
+
+    Returns:
+        dict with all created appointment IDs and schedule.
+    """
+    try:
+        start_dt = datetime.strptime(start_datetime, "%Y-%m-%d %H:%M")
+    except ValueError:
+        return {"error": "Invalid datetime format. Use YYYY-MM-DD HH:MM"}
+
+    conn = _db()
+    created = []
+    try:
+        for i in range(total_sessions):
+            session_dt = start_dt + timedelta(days=period_days * i)
+            appt_type = "doctor"
+            nurse_id = None
+
+            if assign_nurse_alternating and i % 2 == 1:
+                appt_type = "nurse"
+                nurse_id = 1  # demo nurse
+
+            with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+                cur.execute("""
+                    INSERT INTO appointments
+                        (patient_id, doctor_id, nurse_id, appointment_type,
+                         scheduled_at, status, reason, is_periodic,
+                         period_days, total_sessions, session_number)
+                    VALUES (%s, %s, %s, %s, %s, 'scheduled', %s, TRUE, %s, %s, %s)
+                    RETURNING appointment_id, scheduled_at, appointment_type
+                """, (patient_id, doctor_id, nurse_id, appt_type,
+                      session_dt, reason, period_days, total_sessions, i + 1))
+                row = dict(cur.fetchone())
+                conn.commit()
+                created.append({
+                    "session": i + 1,
+                    "appointment_id": row["appointment_id"],
+                    "scheduled_at": str(row["scheduled_at"]),
+                    "type": row["appointment_type"],
+                })
+
+        return {
+            "status": "scheduled",
+            "total_sessions": total_sessions,
+            "period_days": period_days,
+            "appointments": created,
+            "message": f"{total_sessions} sessions scheduled every {period_days} days.",
+        }
+    finally:
+        conn.close()
+
+
+def _find_available_slots(doctor_id: int, from_dt: datetime, count: int = 3) -> list:
+    """Find next available appointment slots."""
+    conn = _db()
+    slots = []
+    check_dt = from_dt + timedelta(hours=1)
+    max_attempts = 20
+
+    try:
+        for _ in range(max_attempts):
+            if len(slots) >= count:
+                break
+            with conn.cursor() as cur:
+                cur.execute("""
+                    SELECT COUNT(*) FROM appointments
+                    WHERE doctor_id = %s AND status = 'scheduled'
+                      AND scheduled_at = %s
+                """, (doctor_id, check_dt))
+                if cur.fetchone()[0] == 0:
+                    if 9 <= check_dt.hour <= 18:
+                        slots.append(check_dt.strftime("%Y-%m-%d %H:%M"))
+            check_dt += timedelta(minutes=30)
+    finally:
+        conn.close()
+    return slots
