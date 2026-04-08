@@ -291,7 +291,7 @@ def get_session_panel_url(appointment_id: int) -> dict:
 
 
 def record_payment(appointment_id: int, patient_id: int,
-                   amount: float, method: str, due_amount: float = 0) -> dict:
+                   amount: float, method: str, due_amount: float = 0.0) -> dict:
     """
     Record payment for an appointment.
 

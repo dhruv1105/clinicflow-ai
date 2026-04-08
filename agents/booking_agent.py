@@ -316,7 +316,7 @@ def _find_available_slots(doctor_id: int, from_dt: datetime, count: int = 3) -> 
 def find_nearby_doctors(
     patient_id: int,
     specialization: Optional[str] = None,
-    radius_km: float = 15,
+    radius_km: float = 15.0,
     limit: int = 5,
 ) -> dict:
     """
