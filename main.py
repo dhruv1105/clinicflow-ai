@@ -46,7 +46,7 @@ SESSION_STORE: dict[str, dict] = {}
 
 # ─── ADK App Setup ──────────────────────────────────────────────
 AGENT_DIR   = os.path.dirname(os.path.abspath(__file__))
-SESSION_URI = "sqlite+aiosqlite:///./clinicflow_sessions.db"
+SESSION_URI = "sqlite:///./clinicflow_sessions.db"
 
 app: FastAPI = get_fast_api_app(
     agents_dir=AGENT_DIR,
@@ -575,5 +575,6 @@ async def api_complete_session(appointment_id: int):
 # ─── Entry Point ─────────────────────────────────────────────────
 
 if __name__ == "__main__":
-    port = int(os.environ.get("PORT", 8000))
-    uvicorn.run(app, host="0.0.0.0", port=port)
+    import uvicorn
+    import os
+    uvicorn.run(app, host="0.0.0.0", port=int(os.environ.get("PORT", 8080)))
