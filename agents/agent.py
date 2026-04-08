@@ -9,6 +9,7 @@ from datetime import datetime, timedelta
 from dotenv import load_dotenv
 from google.adk import Agent
 from google.adk.agents.readonly_context import ReadonlyContext
+from typing import Optional
 
 try:
     import google.cloud.logging
@@ -56,7 +57,7 @@ from agents.calendar_tools import (
 # Dynamic instruction based on role from session state
 # ==============================================================================
 
-def orchestrator_instruction(context: ReadonlyContext) -> str:
+def orchestrator_instruction(context: Optional[ReadonlyContext]) -> Optional[str]:
 
     # ── 1. Try session state first ──────────────────────────────────────────
     role      = context.state.get("role")

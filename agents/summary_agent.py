@@ -15,6 +15,7 @@ from google.cloud import storage
 from google import genai
 from google.genai import types
 from dotenv import load_dotenv
+from typing import Optional
 
 load_dotenv()
 
@@ -45,7 +46,7 @@ def _s(val):
     return val
 
 
-def summarize_appointment(appointment_id: int) -> dict:
+def summarize_appointment(appointment_id: Optional[int]) -> Optional[dict]:
     """
     Full summarization pipeline for a completed appointment:
     1. Fetches all audio segments from GCS
@@ -236,7 +237,7 @@ Only return valid JSON, nothing else.
 def _send_patient_notification(patient_id, telegram_chat_id, email,
                                 patient_name, prescription_text, diagnosis,
                                 clinical_notes="", follow_up="",
-                                medications_mentioned=None) -> dict:
+                                medications_mentioned=None) -> Optional[dict]:
     """Send Telegram/email notification to patient."""
     if medications_mentioned is None:
         medications_mentioned = []
@@ -292,7 +293,7 @@ def _send_patient_notification(patient_id, telegram_chat_id, email,
     return results
 
 
-def get_disease_trends(days: int = 7) -> dict:
+def get_disease_trends(days: Optional[int] = 7) -> Optional[dict]:
     """
     Analyze the most common diagnoses across all appointments in the past N days.
     Uses AlloyDB AI vector search to find semantically similar conditions.

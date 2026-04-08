@@ -11,6 +11,7 @@ from pathlib import Path
 import psycopg2
 import psycopg2.extras
 from dotenv import load_dotenv
+from typing import Optional
 
 load_dotenv()
 
@@ -59,7 +60,7 @@ def _get_calendar_service():
         return None, f"Calendar service build failed: {e}"
 
 
-def create_appointment_calendar_event(appointment_id: int) -> dict:
+def create_appointment_calendar_event(appointment_id: Optional[int]) -> Optional[dict]:
     """
     Create a Google Calendar event for a booked appointment.
     Sends invite to both doctor and patient email.
@@ -185,7 +186,7 @@ def create_appointment_calendar_event(appointment_id: int) -> dict:
         return {"error": f"Calendar event creation failed: {e}"}
 
 
-def update_appointment_calendar_event(appointment_id: int, new_datetime: str) -> dict:
+def update_appointment_calendar_event(appointment_id: Optional[int], new_datetime: Optional[str]) -> Optional[dict]:
     """
     Update an existing Google Calendar event when appointment is rescheduled.
 
@@ -251,7 +252,7 @@ def update_appointment_calendar_event(appointment_id: int, new_datetime: str) ->
         return {"error": f"Calendar event update failed: {e}"}
 
 
-def delete_appointment_calendar_event(appointment_id: int) -> dict:
+def delete_appointment_calendar_event(appointment_id: Optional[int]) -> Optional[dict]:
     """
     Delete a Google Calendar event when appointment is cancelled.
 

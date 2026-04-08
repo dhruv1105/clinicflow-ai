@@ -34,7 +34,7 @@ def _rows(cur):
     return [{k: _s(v) for k, v in dict(r).items()} for r in cur.fetchall()]
 
 
-def get_todays_appointments(doctor_id: int = 1) -> dict:
+def get_todays_appointments(doctor_id: Optional[int] = 1) -> Optional[dict]:
     """
     Get all appointments scheduled for today for the doctor.
 
@@ -67,7 +67,7 @@ def get_todays_appointments(doctor_id: int = 1) -> dict:
         conn.close()
 
 
-def get_upcoming_appointments(patient_id: Optional[int] = None, doctor_id: Optional[int] = None, days: int = 7) -> dict:
+def get_upcoming_appointments(patient_id: Optional[int] = None, doctor_id: Optional[int] = None, days: Optional[int] = 7) -> Optional[dict]:
     """
     Get upcoming appointments for a patient or doctor.
 
@@ -112,8 +112,8 @@ def get_upcoming_appointments(patient_id: Optional[int] = None, doctor_id: Optio
         conn.close()
 
 
-def book_appointment(patient_id: int, doctor_id: int, preferred_datetime: str,
-                     reason: str = "", duration_mins: int = 30) -> dict:
+def book_appointment(patient_id: Optional[int], doctor_id: Optional[int], preferred_datetime: Optional[str],
+                     reason: Optional[str] = "", duration_mins: Optional[int] = 30) -> Optional[dict]:
     """
     Book a new appointment. Auto-approves if slot is available.
 
@@ -176,8 +176,8 @@ def book_appointment(patient_id: int, doctor_id: int, preferred_datetime: str,
         conn.close()
 
 
-def reschedule_appointment(appointment_id: int, new_datetime: str,
-                           reason: str = "Doctor unavailable") -> dict:
+def reschedule_appointment(appointment_id: Optional[int], new_datetime: Optional[str],
+                           reason: Optional[str] = "Doctor unavailable") -> Optional[dict]:
     """
     Reschedule an existing appointment to a new time.
 
@@ -220,10 +220,10 @@ def reschedule_appointment(appointment_id: int, new_datetime: str,
         conn.close()
 
 
-def schedule_periodic_sessions(patient_id: int, doctor_id: int,
-                                start_datetime: str, period_days: int,
-                                total_sessions: int, reason: str,
-                                assign_nurse_alternating: bool = False) -> dict:
+def schedule_periodic_sessions(patient_id: Optional[int], doctor_id: Optional[int],
+                                start_datetime: Optional[str], period_days: Optional[int],
+                                total_sessions: Optional[int], reason: Optional[str],
+                                assign_nurse_alternating: Optional[bool] = False) -> Optional[dict]:
     """
     Schedule a series of periodic appointments (e.g. weekly physiotherapy).
     Optionally assigns alternate sessions to nurse.
@@ -287,7 +287,7 @@ def schedule_periodic_sessions(patient_id: int, doctor_id: int,
         conn.close()
 
 
-def _find_available_slots(doctor_id: int, from_dt: datetime, count: int = 3) -> list:
+def _find_available_slots(doctor_id: Optional[int], from_dt: Optional[datetime], count: Optional[int] = 3) -> Optional[list]:
     """Find next available appointment slots."""
     conn = _db()
     slots = []
@@ -314,11 +314,11 @@ def _find_available_slots(doctor_id: int, from_dt: datetime, count: int = 3) -> 
 
 
 def find_nearby_doctors(
-    patient_id: int,
-    specialization: str = None,
-    radius_km: float = 15,
-    limit: int = 5,
-) -> dict:
+    patient_id: Optional[int],
+    specialization: Optional[str] = None,
+    radius_km: Optional[float] = 15,
+    limit: Optional[int] = 5,
+) -> Optional[dict]:
     """
     Find doctors nearest to the patient's registered location.
     Ranks by distance first, then by rating descending.

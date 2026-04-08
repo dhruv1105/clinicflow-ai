@@ -11,6 +11,7 @@ from decimal import Decimal
 from datetime import date, datetime
 from google.cloud import storage
 from dotenv import load_dotenv
+from typing import Optional
 
 load_dotenv()
 
@@ -36,7 +37,7 @@ def _s(val):
     return val
 
 
-def get_patient_history(patient_id: int) -> dict:
+def get_patient_history(patient_id: Optional[int]) -> Optional[dict]:
     """
     Retrieve complete medical history for a patient before their appointment.
 
@@ -99,8 +100,8 @@ def get_patient_history(patient_id: int) -> dict:
         conn.close()
 
 
-def save_audio_segment_base64(appointment_id: int, audio_base64: str,
-                               order_num: int = 1, mime_type: str = "audio/webm") -> dict:
+def save_audio_segment_base64(appointment_id: Optional[int], audio_base64: Optional[str],
+                               order_num: Optional[int] = 1, mime_type: Optional[str] = "audio/webm") -> Optional[dict]:
     """
     Save an audio recording segment to GCS and register in AlloyDB.
     Audio is provided as base64-encoded string.
@@ -152,8 +153,8 @@ def save_audio_segment_base64(appointment_id: int, audio_base64: str,
         conn.close()
 
 
-def upload_prescription_base64(appointment_id: int, image_base64: str,
-                                mime_type: str = "image/jpeg") -> dict:
+def upload_prescription_base64(appointment_id: Optional[int], image_base64: Optional[str],
+                                mime_type: Optional[str] = "image/jpeg") -> Optional[dict]:
     """
     Upload a prescription photo to GCS.
 
@@ -200,7 +201,7 @@ def upload_prescription_base64(appointment_id: int, image_base64: str,
         conn.close()
 
 
-def mark_appointment_complete(appointment_id: int) -> dict:
+def mark_appointment_complete(appointment_id: Optional[int]) -> Optional[dict]:
     """
     Mark an appointment as complete. This TRIGGERS the full summarization pipeline:
     - Transcribes all audio segments using Gemini
@@ -246,7 +247,7 @@ def mark_appointment_complete(appointment_id: int) -> dict:
         conn.close()
 
 
-def get_session_panel_url(appointment_id: int) -> dict:
+def get_session_panel_url(appointment_id: Optional[int]) -> Optional[dict]:
     """
     Returns the session panel URL for a given appointment.
     Call this when the doctor wants to start a session — record audio or upload prescription.
@@ -289,8 +290,8 @@ def get_session_panel_url(appointment_id: int) -> dict:
     }
 
 
-def record_payment(appointment_id: int, patient_id: int,
-                   amount: float, method: str, due_amount: float = 0) -> dict:
+def record_payment(appointment_id: Optional[int], patient_id: Optional[int],
+                   amount: Optional[float], method: Optional[str], due_amount: Optional[float] = 0) -> Optional[dict]:
     """
     Record payment for an appointment.
 
