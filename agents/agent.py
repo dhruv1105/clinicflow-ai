@@ -1,6 +1,7 @@
 """
 ClinicFlow AI — Orchestrator Agent
 Role-aware root agent that coordinates all sub-agents.
+
 """
 
 import os
@@ -9,7 +10,6 @@ from datetime import datetime, timedelta
 from dotenv import load_dotenv
 from google.adk import Agent
 from google.adk.agents.readonly_context import ReadonlyContext
-from typing import Optional
 
 try:
     import google.cloud.logging
@@ -57,7 +57,7 @@ from agents.calendar_tools import (
 # Dynamic instruction based on role from session state
 # ==============================================================================
 
-def orchestrator_instruction(context: Optional[ReadonlyContext]) -> Optional[str]:
+def orchestrator_instruction(context: ReadonlyContext) -> str:
 
     # ── 1. Try session state first ──────────────────────────────────────────
     role      = context.state.get("role")
@@ -75,6 +75,7 @@ def orchestrator_instruction(context: Optional[ReadonlyContext]) -> Optional[str
         except Exception:
             role = "unknown"
 
+    # ── 3. Fix "Dr. Dr." double prefix ─────────────────────────────────────
     display_name = user_name.replace("Dr. ", "").strip() if user_name else "User"
 
     # ── 4. Inject current date/time so agent never hallucinates dates ───────

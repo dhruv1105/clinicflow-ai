@@ -6,12 +6,12 @@ Uses OAuth2 token stored in calendar_token.json (run auth flow once to generate 
 
 import os
 import json
+from typing import Optional
 from datetime import datetime, timedelta
 from pathlib import Path
 import psycopg2
 import psycopg2.extras
 from dotenv import load_dotenv
-from typing import Optional
 
 load_dotenv()
 
@@ -24,8 +24,8 @@ DB_CONFIG = {
     "sslmode":  "require",
 }
 
-TOKEN_PATH       = Path(__file__).parent.parent / "calendar_token.json"
-CREDENTIALS_PATH = Path(__file__).parent.parent / "calendar_credentials.json"
+TOKEN_PATH       = Path(__file__).parent / "calendar_token.json"
+CREDENTIALS_PATH = Path(__file__).parent / "calendar_credentials.json"
 SCOPES           = ["https://www.googleapis.com/auth/calendar"]
 
 
@@ -60,7 +60,7 @@ def _get_calendar_service():
         return None, f"Calendar service build failed: {e}"
 
 
-def create_appointment_calendar_event(appointment_id: Optional[int]) -> Optional[dict]:
+def create_appointment_calendar_event(appointment_id: int) -> dict:
     """
     Create a Google Calendar event for a booked appointment.
     Sends invite to both doctor and patient email.
@@ -186,7 +186,7 @@ def create_appointment_calendar_event(appointment_id: Optional[int]) -> Optional
         return {"error": f"Calendar event creation failed: {e}"}
 
 
-def update_appointment_calendar_event(appointment_id: Optional[int], new_datetime: Optional[str]) -> Optional[dict]:
+def update_appointment_calendar_event(appointment_id: int, new_datetime: str) -> dict:
     """
     Update an existing Google Calendar event when appointment is rescheduled.
 
@@ -252,7 +252,7 @@ def update_appointment_calendar_event(appointment_id: Optional[int], new_datetim
         return {"error": f"Calendar event update failed: {e}"}
 
 
-def delete_appointment_calendar_event(appointment_id: Optional[int]) -> Optional[dict]:
+def delete_appointment_calendar_event(appointment_id: int) -> dict:
     """
     Delete a Google Calendar event when appointment is cancelled.
 

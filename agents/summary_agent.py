@@ -46,7 +46,7 @@ def _s(val):
     return val
 
 
-def summarize_appointment(appointment_id: Optional[int]) -> Optional[dict]:
+def summarize_appointment(appointment_id: int) -> dict:
     """
     Full summarization pipeline for a completed appointment:
     1. Fetches all audio segments from GCS
@@ -65,7 +65,6 @@ def summarize_appointment(appointment_id: Optional[int]) -> Optional[dict]:
     """
     conn = _db()
     try:
-        # Get appointment info
         with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
             cur.execute("""
                 SELECT a.*, p.name AS patient_name, p.email AS patient_email,
@@ -79,7 +78,6 @@ def summarize_appointment(appointment_id: Optional[int]) -> Optional[dict]:
         if not appt:
             return {"error": f"Appointment {appointment_id} not found"}
 
-        # Fetch audio segments from DB
         with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
             cur.execute("""
                 SELECT segment_id, gcs_path, order_num
@@ -89,7 +87,6 @@ def summarize_appointment(appointment_id: Optional[int]) -> Optional[dict]:
             """, (appointment_id,))
             segments = [dict(r) for r in cur.fetchall()]
 
-        # Transcribe each audio segment
         transcriptions = []
         storage_client = storage.Client(project=PROJECT_ID)
         bucket = storage_client.bucket(GCS_BUCKET)
@@ -98,11 +95,7 @@ def summarize_appointment(appointment_id: Optional[int]) -> Optional[dict]:
             try:
                 blob = bucket.blob(seg["gcs_path"])
                 audio_bytes = blob.download_as_bytes()
-                audio_b64 = base64.b64encode(audio_bytes).decode()
-
-                # Determine mime type from path
                 mime = "audio/webm" if "webm" in seg["gcs_path"] else "audio/mpeg"
-
                 response = gemini_client.models.generate_content(
                     model=MODEL,
                     contents=[
@@ -114,8 +107,6 @@ def summarize_appointment(appointment_id: Optional[int]) -> Optional[dict]:
                 )
                 transcript = response.text.strip()
                 transcriptions.append(f"[Segment {seg['order_num']}]\n{transcript}")
-
-                # Update DB with transcription
                 with conn.cursor() as cur:
                     cur.execute("UPDATE audio_segments SET transcription = %s WHERE segment_id = %s",
                                 (transcript, seg["segment_id"]))
@@ -125,7 +116,6 @@ def summarize_appointment(appointment_id: Optional[int]) -> Optional[dict]:
 
         full_transcript = "\n\n".join(transcriptions) if transcriptions else "No audio recorded."
 
-        # Generate clinical summary
         summary_prompt = f"""
 You are a medical AI assistant. Based on this doctor-patient conversation transcript,
 extract a structured clinical summary.
@@ -155,7 +145,6 @@ Only return valid JSON, nothing else.
                 "medications_mentioned": []
             }
 
-        # OCR prescription if exists
         prescription_text = ""
         with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
             cur.execute("SELECT gcs_path FROM prescriptions WHERE appointment_id = %s", (appointment_id,))
@@ -181,7 +170,6 @@ Only return valid JSON, nothing else.
             except Exception as e:
                 prescription_text = f"Prescription OCR failed: {e}"
 
-        # Save summary to DB
         with conn.cursor() as cur:
             cur.execute("""
                 INSERT INTO session_summaries
@@ -191,23 +179,22 @@ Only return valid JSON, nothing else.
             """, (appointment_id, full_transcript,
                   summary_data.get("diagnosis"), summary_data.get("clinical_notes"),
                   summary_data.get("follow_up")))
-
-            # Update appointment
             cur.execute("UPDATE appointments SET summary_generated = TRUE WHERE appointment_id = %s",
                         (appointment_id,))
             conn.commit()
 
-        # Generate summary vector
-        with conn.cursor() as cur:
-            cur.execute("""
-                UPDATE session_summaries
-                SET summary_vector = embedding('text-embedding-005',
-                    COALESCE(diagnosis,'') || ' ' || COALESCE(clinical_notes,''))::vector
-                WHERE appointment_id = %s
-            """, (appointment_id,))
-            conn.commit()
+        try:
+            with conn.cursor() as cur:
+                cur.execute("""
+                    UPDATE session_summaries
+                    SET summary_vector = embedding('text-embedding-005',
+                        COALESCE(diagnosis,'') || ' ' || COALESCE(clinical_notes,''))::vector
+                    WHERE appointment_id = %s
+                """, (appointment_id,))
+                conn.commit()
+        except Exception:
+            pass  # embedding() may not be available in all environments
 
-        # Send patient notification
         notif_status = _send_patient_notification(
             appt.get("patient_id"),
             appt.get("telegram_chat_id"),
@@ -237,7 +224,7 @@ Only return valid JSON, nothing else.
 def _send_patient_notification(patient_id, telegram_chat_id, email,
                                 patient_name, prescription_text, diagnosis,
                                 clinical_notes="", follow_up="",
-                                medications_mentioned=None) -> Optional[dict]:
+                                medications_mentioned=None) -> dict:
     """Send Telegram/email notification to patient."""
     if medications_mentioned is None:
         medications_mentioned = []
@@ -262,7 +249,6 @@ def _send_patient_notification(patient_id, telegram_chat_id, email,
 
     results = {}
 
-    # Telegram
     if telegram_chat_id and TELEGRAM_TOKEN:
         try:
             resp = httpx.post(
@@ -276,7 +262,6 @@ def _send_patient_notification(patient_id, telegram_chat_id, email,
     else:
         results["telegram"] = "skipped (no chat_id or token)"
 
-    # Log notification
     if patient_id:
         try:
             conn = _db()
@@ -293,7 +278,7 @@ def _send_patient_notification(patient_id, telegram_chat_id, email,
     return results
 
 
-def get_disease_trends(days: Optional[int] = 7) -> Optional[dict]:
+def get_disease_trends(days: int = 7) -> dict:
     """
     Analyze the most common diagnoses across all appointments in the past N days.
     Uses AlloyDB AI vector search to find semantically similar conditions.
@@ -322,7 +307,6 @@ def get_disease_trends(days: Optional[int] = 7) -> Optional[dict]:
         if not summaries:
             return {"message": "No completed appointments in this period", "days": days}
 
-        # Ask Gemini to analyze trends
         diagnoses_text = "\n".join([
             f"- Patient {r['age']}y {r['gender']}: {r['diagnosis']}"
             for r in summaries

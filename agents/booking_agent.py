@@ -7,9 +7,9 @@ import os
 import psycopg2
 import psycopg2.extras
 from decimal import Decimal
+from typing import Optional
 from datetime import datetime, timedelta, date
 from dotenv import load_dotenv
-from typing import Optional
 
 load_dotenv()
 
@@ -34,7 +34,7 @@ def _rows(cur):
     return [{k: _s(v) for k, v in dict(r).items()} for r in cur.fetchall()]
 
 
-def get_todays_appointments(doctor_id: Optional[int] = 1) -> Optional[dict]:
+def get_todays_appointments(doctor_id: int = 1) -> dict:
     """
     Get all appointments scheduled for today for the doctor.
 
@@ -67,7 +67,7 @@ def get_todays_appointments(doctor_id: Optional[int] = 1) -> Optional[dict]:
         conn.close()
 
 
-def get_upcoming_appointments(patient_id: Optional[int] = None, doctor_id: Optional[int] = None, days: Optional[int] = 7) -> Optional[dict]:
+def get_upcoming_appointments(patient_id: Optional[int] = None, doctor_id: Optional[int] = None, days: int = 7) -> dict:
     """
     Get upcoming appointments for a patient or doctor.
 
@@ -112,8 +112,8 @@ def get_upcoming_appointments(patient_id: Optional[int] = None, doctor_id: Optio
         conn.close()
 
 
-def book_appointment(patient_id: Optional[int], doctor_id: Optional[int], preferred_datetime: Optional[str],
-                     reason: Optional[str] = "", duration_mins: Optional[int] = 30) -> Optional[dict]:
+def book_appointment(patient_id: int, doctor_id: int, preferred_datetime: str,
+                     reason: str = "", duration_mins: int = 30) -> dict:
     """
     Book a new appointment. Auto-approves if slot is available.
 
@@ -176,8 +176,8 @@ def book_appointment(patient_id: Optional[int], doctor_id: Optional[int], prefer
         conn.close()
 
 
-def reschedule_appointment(appointment_id: Optional[int], new_datetime: Optional[str],
-                           reason: Optional[str] = "Doctor unavailable") -> Optional[dict]:
+def reschedule_appointment(appointment_id: int, new_datetime: str,
+                           reason: str = "Doctor unavailable") -> dict:
     """
     Reschedule an existing appointment to a new time.
 
@@ -220,10 +220,10 @@ def reschedule_appointment(appointment_id: Optional[int], new_datetime: Optional
         conn.close()
 
 
-def schedule_periodic_sessions(patient_id: Optional[int], doctor_id: Optional[int],
-                                start_datetime: Optional[str], period_days: Optional[int],
-                                total_sessions: Optional[int], reason: Optional[str],
-                                assign_nurse_alternating: Optional[bool] = False) -> Optional[dict]:
+def schedule_periodic_sessions(patient_id: int, doctor_id: int,
+                                start_datetime: str, period_days: int,
+                                total_sessions: int, reason: str,
+                                assign_nurse_alternating: bool = False) -> dict:
     """
     Schedule a series of periodic appointments (e.g. weekly physiotherapy).
     Optionally assigns alternate sessions to nurse.
@@ -255,7 +255,7 @@ def schedule_periodic_sessions(patient_id: Optional[int], doctor_id: Optional[in
 
             if assign_nurse_alternating and i % 2 == 1:
                 appt_type = "nurse"
-                nurse_id = 1
+                nurse_id = 1  # demo nurse
 
             with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
                 cur.execute("""
@@ -287,7 +287,7 @@ def schedule_periodic_sessions(patient_id: Optional[int], doctor_id: Optional[in
         conn.close()
 
 
-def _find_available_slots(doctor_id: Optional[int], from_dt: Optional[datetime], count: Optional[int] = 3) -> Optional[list]:
+def _find_available_slots(doctor_id: int, from_dt: datetime, count: int = 3) -> list:
     """Find next available appointment slots."""
     conn = _db()
     slots = []
@@ -314,11 +314,11 @@ def _find_available_slots(doctor_id: Optional[int], from_dt: Optional[datetime],
 
 
 def find_nearby_doctors(
-    patient_id: Optional[int],
+    patient_id: int,
     specialization: Optional[str] = None,
-    radius_km: Optional[float] = 15,
-    limit: Optional[int] = 5,
-) -> Optional[dict]:
+    radius_km: float = 15,
+    limit: int = 5,
+) -> dict:
     """
     Find doctors nearest to the patient's registered location.
     Ranks by distance first, then by rating descending.
