@@ -9,6 +9,7 @@ import psycopg2.extras
 from decimal import Decimal
 from datetime import datetime, timedelta, date
 from dotenv import load_dotenv
+from typing import Optional
 
 load_dotenv()
 
@@ -66,7 +67,7 @@ def get_todays_appointments(doctor_id: int = 1) -> dict:
         conn.close()
 
 
-def get_upcoming_appointments(patient_id: int = None, doctor_id: int = None, days: int = 7) -> dict:
+def get_upcoming_appointments(patient_id: Optional[int] = None, doctor_id: Optional[int] = None, days: int = 7) -> dict:
     """
     Get upcoming appointments for a patient or doctor.
 
