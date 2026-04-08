@@ -254,7 +254,7 @@ def schedule_periodic_sessions(patient_id: int, doctor_id: int,
 
             if assign_nurse_alternating and i % 2 == 1:
                 appt_type = "nurse"
-                nurse_id = 1  # demo nurse
+                nurse_id = 1
 
             with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
                 cur.execute("""
@@ -310,3 +310,124 @@ def _find_available_slots(doctor_id: int, from_dt: datetime, count: int = 3) -> 
     finally:
         conn.close()
     return slots
+
+
+def find_nearby_doctors(
+    patient_id: int,
+    specialization: str = None,
+    radius_km: float = 15,
+    limit: int = 5,
+) -> dict:
+    """
+    Find doctors nearest to the patient's registered location.
+    Ranks by distance first, then by rating descending.
+    Optionally filter by specialization.
+
+    Args:
+        patient_id: Patient's ID (location is fetched from DB automatically)
+        specialization: Optional filter e.g. 'Cardiologist', 'General Physician'
+        radius_km: Search radius in kilometres (default 15)
+        limit: Max number of doctors to return (default 5)
+
+    Returns:
+        dict with ranked list of nearby doctors including distance, rating,
+        experience, consultation fee, and next available slot hint.
+    """
+    conn = _db()
+    try:
+        # Get patient's location
+        with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+            cur.execute(
+                "SELECT name, latitude, longitude FROM patients WHERE patient_id = %s",
+                (patient_id,)
+            )
+            patient = cur.fetchone()
+
+        if not patient or not patient["latitude"]:
+            return {"error": "Patient location not available in records."}
+
+        plat = float(patient["latitude"])
+        plng = float(patient["longitude"])
+
+        # Haversine distance in SQL — works on standard PostgreSQL / AlloyDB
+        spec_filter = "AND LOWER(d.specialization) = LOWER(%(spec)s)" if specialization else ""
+
+        sql = f"""
+            SELECT *
+            FROM (
+                SELECT
+                    d.doctor_id,
+                    d.name,
+                    d.specialization,
+                    d.address,
+                    d.city,
+                    d.experience_years,
+                    d.rating,
+                    d.total_reviews,
+                    d.consultation_fee,
+                    d.available_days,
+                    ROUND(
+                        (6371 * acos(
+                            LEAST(1.0, GREATEST(-1.0,
+                                cos(radians(%(plat)s)) * cos(radians(d.latitude))
+                                * cos(radians(d.longitude) - radians(%(plng)s))
+                                + sin(radians(%(plat)s)) * sin(radians(d.latitude))
+                            ))
+                        ))::numeric, 2
+                    ) AS distance_km
+                FROM doctors d
+                WHERE d.latitude IS NOT NULL
+                  AND d.longitude IS NOT NULL
+                  {spec_filter}
+            ) sub
+            WHERE sub.distance_km <= %(radius)s
+            ORDER BY sub.distance_km ASC, sub.rating DESC
+            LIMIT %(limit)s
+        """
+
+        params = {
+            "plat": plat, "plng": plng,
+            "radius": radius_km, "limit": limit,
+        }
+        if specialization:
+            params["spec"] = specialization
+
+        with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+            cur.execute(sql, params)
+            doctors = [dict(r) for r in cur.fetchall()]
+
+        if not doctors:
+            # Widen search automatically if nothing found
+            return {
+                "message": f"No {'` + specialization + `' if specialization else 'doctors'} found within {radius_km}km. Try increasing radius or a different specialization.",
+                "patient_location": f"{plat}, {plng}",
+                "doctors": [],
+            }
+
+        # Serialise Decimal/date fields
+        result = []
+        for d in doctors:
+            result.append({
+                "doctor_id":        d["doctor_id"],
+                "name":             d["name"],
+                "specialization":   d["specialization"],
+                "address":          d["address"],
+                "city":             d["city"],
+                "experience_years": d["experience_years"],
+                "rating":           float(d["rating"]) if d["rating"] else None,
+                "total_reviews":    d["total_reviews"],
+                "consultation_fee": d["consultation_fee"],
+                "available_days":   d["available_days"],
+                "distance_km":      float(d["distance_km"]),
+            })
+
+        return {
+            "patient_name":    patient["name"],
+            "search_radius_km": radius_km,
+            "specialization_filter": specialization or "Any",
+            "total_found":     len(result),
+            "doctors":         result,
+            "tip": "To book with any of these doctors, just say 'Book appointment with Dr. [Name]'.",
+        }
+    finally:
+        conn.close()

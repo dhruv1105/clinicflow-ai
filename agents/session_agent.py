@@ -246,6 +246,49 @@ def mark_appointment_complete(appointment_id: int) -> dict:
         conn.close()
 
 
+def get_session_panel_url(appointment_id: int) -> dict:
+    """
+    Returns the session panel URL for a given appointment.
+    Call this when the doctor wants to start a session — record audio or upload prescription.
+    The doctor should open the returned URL in a new browser tab.
+
+    Args:
+        appointment_id: The appointment ID to open a session for
+
+    Returns:
+        dict with the clickable session panel URL.
+    """
+    conn = _db()
+    try:
+        with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+            cur.execute("""
+                SELECT a.appointment_id, a.reason, a.status,
+                       p.name AS patient_name
+                FROM appointments a
+                JOIN patients p ON a.patient_id = p.patient_id
+                WHERE a.appointment_id = %s
+            """, (appointment_id,))
+            row = cur.fetchone()
+    finally:
+        conn.close()
+
+    if not row:
+        return {"error": f"Appointment {appointment_id} not found"}
+
+    return {
+        "session_url": f"/session/{appointment_id}",
+        "appointment_id": appointment_id,
+        "patient_name": row["patient_name"],
+        "reason": row["reason"],
+        "status": row["status"],
+        "message": (
+            f"Session panel ready for {row['patient_name']}. "
+            f"Open the link below in a new tab to record audio and upload prescription:\n\n"
+            f"👉 [Open Session Panel — {row['patient_name']}](/session/{appointment_id})"
+        ),
+    }
+
+
 def record_payment(appointment_id: int, patient_id: int,
                    amount: float, method: str, due_amount: float = 0) -> dict:
     """

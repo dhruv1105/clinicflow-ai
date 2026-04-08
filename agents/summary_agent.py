@@ -214,6 +214,9 @@ Only return valid JSON, nothing else.
             appt.get("patient_name"),
             prescription_text,
             summary_data.get("diagnosis", ""),
+            summary_data.get("clinical_notes", ""),
+            summary_data.get("follow_up", ""),
+            summary_data.get("medications_mentioned", []),
         )
 
         return {
@@ -231,16 +234,30 @@ Only return valid JSON, nothing else.
 
 
 def _send_patient_notification(patient_id, telegram_chat_id, email,
-                                patient_name, prescription_text, diagnosis) -> dict:
+                                patient_name, prescription_text, diagnosis,
+                                clinical_notes="", follow_up="",
+                                medications_mentioned=None) -> dict:
     """Send Telegram/email notification to patient."""
+    if medications_mentioned is None:
+        medications_mentioned = []
+
     msg = (
-        f"🏥 *ClinicFlow AI — Visit Summary*\n\n"
-        f"Hi {patient_name}! Your appointment is complete.\n\n"
-        f"*Diagnosis:* {diagnosis}\n\n"
+        f"🏥 *ClinicFlow AI — Visit Summary*\n"
+        f"━━━━━━━━━━━━━━━━━━━━━━━\n\n"
+        f"👤 *Patient:* {patient_name}\n\n"
+        f"🔬 *Diagnosis:*\n{diagnosis}\n\n"
     )
+    if clinical_notes:
+        msg += f"📋 *Clinical Notes:*\n{clinical_notes}\n\n"
+    if medications_mentioned:
+        meds_str = "\n".join(f"  • {m}" for m in medications_mentioned)
+        msg += f"💊 *Medications Prescribed:*\n{meds_str}\n\n"
     if prescription_text:
-        msg += f"*💊 Prescription:*\n{prescription_text[:500]}\n\n"
-    msg += "_Please collect your medicines as prescribed. Stay healthy!_"
+        msg += f"📄 *Prescription Details:*\n{prescription_text[:600]}\n\n"
+    if follow_up:
+        msg += f"📅 *Follow-up Instructions:*\n{follow_up}\n\n"
+    msg += "━━━━━━━━━━━━━━━━━━━━━━━\n"
+    msg += "_ClinicFlow AI — Your health, our priority. Stay healthy! 🌿_"
 
     results = {}
 

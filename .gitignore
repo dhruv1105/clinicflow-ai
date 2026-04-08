@@ -15,3 +15,5 @@ venv/
 # OS
 .DS_Store
 Thumbs.db
+calendar_credentials.json
+calendar_token.json
