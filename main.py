@@ -58,7 +58,7 @@ app: FastAPI = get_fast_api_app(
 from fastapi.routing import APIRoute
 
 async def login_page():
-    index_path = Path(__file__).parent / "frontend" / "index.html"
+    index_path = Path(__file__).parent.parent / "support" / "frontend" / "index.html"
     return HTMLResponse(content=index_path.read_text())
 
 app.router.routes.insert(0, APIRoute("/", endpoint=login_page, methods=["GET"]))
