@@ -125,41 +125,72 @@ def _get_appointment_info(appointment_id: int) -> dict:
 # ─── Auth Routes ───────────────────────────────────────────────── 
 
 @app.post("/login")
-async def login(
-    request: Request,
-    email: str = Form(...),
-    password: str = Form(...),
-):
+async def login(request: Request, email: str = Form(...), password: str = Form(...)):
     user = _verify_login(email, password)
     if not user:
         return RedirectResponse("/?error=invalid", status_code=303)
 
-    user_id = f"{user['role']}_{user['linked_id']}"
-    role    = user["role"]
-    name    = user["user_name"] or email
+    user_id  = f"{user['role']}_{user['linked_id']}"
+    role     = user["role"]
+    name     = user["user_name"] or email
+    cookie_id = str(uuid.uuid4())
 
     initial_state = {
-        "role":       role,
-        "user_name":  name,
-        "user_id":    str(user["linked_id"]),
-        "user_email": email,
+        "role": role, "user_name": name,
+        "user_id": str(user["linked_id"]), "user_email": email,
     }
 
-    # Persist in cookie store
-    cookie_id = str(uuid.uuid4())
+    # Save to memory
     SESSION_STORE[cookie_id] = {**initial_state, "adk_user_id": user_id}
-
-    # Persist in shared in-memory store — agent reads this as fallback
     from shared_state import set_user
     set_user(user_id, initial_state)
 
-    response = RedirectResponse(
-        f"/dev-ui/?app=agents&userId={user_id}",
-        status_code=303,
-    )
+    # ── Save to DB so it survives Cloud Run instance switches ──
+    # In main.py login handler, add:
+    try:
+        conn = _db()
+        with conn.cursor() as cur:
+            cur.execute("""
+                INSERT INTO cf_sessions (cookie_id, role, user_name, user_id, user_email)
+                VALUES ('__latest__', %s, %s, %s, %s)
+                ON CONFLICT (cookie_id) DO UPDATE
+                SET role=EXCLUDED.role, user_name=EXCLUDED.user_name,
+                    user_id=EXCLUDED.user_id, user_email=EXCLUDED.user_email
+            """, (role, name, str(user["linked_id"]), email))
+            conn.commit()
+        conn.close()
+    except Exception as e:
+        print(f"[login] latest session save failed: {e}")
+    
+    
+    response = RedirectResponse(f"/dev-ui/?app=agents&userId={user_id}", status_code=303)
     response.set_cookie("cf_session", cookie_id, httponly=True, samesite="lax")
     return response
 
+
+@app.get("/api/whoami")
+async def whoami(request: Request):
+    cookie_id = request.cookies.get("cf_session", "")
+    
+    # Try memory
+    data = SESSION_STORE.get(cookie_id)
+    if data:
+        return JSONResponse({"role": data["role"], "user_name": data["user_name"], "user_id": data["user_id"]})
+    
+    # Try DB
+    if cookie_id:
+        try:
+            conn = _db()
+            with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+                cur.execute("SELECT role, user_name, user_id FROM cf_sessions WHERE cookie_id = %s", (cookie_id,))
+                row = cur.fetchone()
+            conn.close()
+            if row:
+                return JSONResponse(dict(row))
+        except Exception as e:
+            print(f"[whoami] DB read failed: {e}")
+    
+    return JSONResponse({"role": "unknown", "user_name": "", "user_id": ""})
 
 @app.get("/logout")
 async def logout(request: Request):

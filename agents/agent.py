@@ -52,27 +52,68 @@ from agents.calendar_tools import (
     delete_appointment_calendar_event,
 )
 
+import psycopg2
+import psycopg2.extras
+import os
+
+def _get_role_from_db() -> dict:
+    """Read the most recently logged-in user from DB."""
+    try:
+        conn = psycopg2.connect(
+            host=os.getenv("DB_HOST"), port=os.getenv("DB_PORT", "5432"),
+            dbname=os.getenv("DB_NAME", "postgres"), user=os.getenv("DB_USER", "postgres"),
+            password=os.getenv("DB_PASSWORD"), sslmode="require",
+        )
+        with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+            cur.execute("SELECT role, user_name, user_id FROM cf_sessions WHERE cookie_id = '__latest__'")
+            row = cur.fetchone()
+        conn.close()
+        return dict(row) if row else {}
+    except Exception as e:
+        print(f"[agent] _get_role_from_db failed: {e}")
+        return {}
+
+
+import httpx
+
+def identify_user() -> dict:
+    """
+    Call this FIRST in every conversation to identify the logged-in user.
+    Returns their role (doctor/patient), name, and ID.
+    """
+    import httpx, os
+    try:
+        # Read cookie from SESSION_STORE via internal API
+        base = f"http://localhost:{os.environ.get('PORT', '8080')}"
+        resp = httpx.get(f"{base}/api/whoami", timeout=3)
+        return resp.json()
+    except Exception as e:
+        return {"error": str(e), "role": "unknown"}
 
 # ==============================================================================
 # Dynamic instruction based on role from session state
 # ==============================================================================
 
 def orchestrator_instruction(context: ReadonlyContext) -> str:
-
-    # ── 1. Try session state first ──────────────────────────────────────────
     role      = context.state.get("role")
     user_name = context.state.get("user_name", "")
     user_id   = context.state.get("user_id", "1")
 
-    # ── 2. Fallback: shared in-memory store keyed by ADK user_id ───────────
     if not role:
         try:
             adk_user_id = context._invocation_context.session.user_id
-            stored      = get_user(adk_user_id)
-            role        = stored.get("role", "unknown")
-            user_name   = stored.get("user_name", "User")
-            user_id     = stored.get("user_id", "1")
-        except Exception:
+            if "_" in adk_user_id:
+                parts = adk_user_id.split("_", 1)
+                role, user_id = parts[0], parts[1]
+                user_name = _get_name_from_db(role, user_id)
+            else:
+                # Dev UI defaulted to "user" — read latest login from DB
+                stored = _get_role_from_db()
+                role      = stored.get("role", "unknown")
+                user_name = stored.get("user_name", "User")
+                user_id   = stored.get("user_id", "1")
+        except Exception as e:
+            print(f"[agent] fallback error: {e}")
             role = "unknown"
 
     # ── 3. Fix "Dr. Dr." double prefix ─────────────────────────────────────
